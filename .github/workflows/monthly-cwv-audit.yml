@@ -2,38 +2,42 @@ name: Monthly CWV Audit
 
 on:
   schedule:
-    - cron: '0 0 1 * *'
+    # Run at 6:00 AM UTC on the 1st of every month
+    - cron: '0 6 1 * *'
+
+  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
 
 jobs:
-  audit:
+  run-audit:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 30
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install dependencies
-        run: npm install --prefix scripts
+        working-directory: ./scripts
+        run: npm install
 
       - name: Run CWV Audit
+        working-directory: ./scripts
         env:
-          PSI_API_KEY: ${{ secrets.PSI_API_KEY }}
           FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+          PSI_API_KEY: ${{ secrets.PSI_API_KEY }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          AUDIT_STRATEGY: desktop
-        run: npm run --prefix scripts audit
+        run: npx tsx run-audit.ts
 
-      - name: Notify on failure
+      - name: Log completion
+        if: success()
+        run: echo "CWV Audit completed successfully at $(date)"
+
+      - name: Log failure
         if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '❌ Monthly CWV audit failed. Check the workflow logs for details.'
-            })
+        run: echo "CWV Audit FAILED at $(date)"
