@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "audit": "tsx run-audit.ts"
+    "audit": "tsx run-audit.ts",
+    "seed": "tsx seed-firestore.ts",
+    "deploy-rules": "tsx deploy-rules.ts"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",

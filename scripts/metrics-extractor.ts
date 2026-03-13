@@ -1,3 +1,6 @@
+import { AuditResult } from './firestore-writer';
+import admin from 'firebase-admin';
+
 interface ResourceItem {
   resourceType: string;
   requestCount?: number;
@@ -5,39 +8,32 @@ interface ResourceItem {
   resourceSize?: number;
 }
 
-export interface ExtractedMetrics {
-  performance: { score: number };
-  lcp: number;
-  tbt: number;
-  cls: number;
-  fcp: number;
-  si: number;
-  tti: number;
-  serverResponseTime: number;
-  resourceSummary: ResourceItem[];
-  unusedJs: number;
-  unusedCss: number;
-  renderBlocking: any;
-  longTasks: any;
-  mainThreadWork: number;
-  lcpElement: string;
-  clsCulprits: any[];
-  fontIssues: any;
-  networkRequests: number;
-  totalByteWeight: number;
-  httpProtocol: string;
-  pageWeight: number;
-  timestamp: string;
+interface PSIAudit {
+  numericValue?: number;
+  details?: {
+    items?: any[];
+    overallSavingsBytes?: number;
+  };
 }
 
-export function extractMetrics(psiResponse: any): ExtractedMetrics {
+export function extractMetrics(
+  psiResponse: any,
+  pageId: string,
+  pageUrl: string,
+  pageName: string,
+  auditRunId: string,
+  strategy: 'desktop' | 'mobile',
+  now: Date
+): Omit<AuditResult, 'id' | 'createdAt'> {
   const lr = psiResponse.lighthouseResult || {};
   const audits = lr.audits || {};
 
-  // Performance score
-  const performanceScore = (lr.categories?.performance?.score || 0) * 100;
+  const runMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  // Core Web Vitals
+  // Performance score (0-100)
+  const performanceScore = Math.round((lr.categories?.performance?.score || 0) * 100);
+
+  // Core Web Vitals metrics
   const lcp = audits['largest-contentful-paint']?.numericValue || 0;
   const tbt = audits['total-blocking-time']?.numericValue || 0;
   const cls = audits['cumulative-layout-shift']?.numericValue || 0;
@@ -49,35 +45,83 @@ export function extractMetrics(psiResponse: any): ExtractedMetrics {
   const serverResponseTime = audits['server-response-time']?.numericValue || 0;
 
   // Resource summary
-  const resourceSummary = audits['resource-summary']?.details?.items || [];
+  const resourceSummary: ResourceItem[] = audits['resource-summary']?.details?.items || [];
+
+  // Compute status for metrics
+  const lcpStatus = getMetricStatus(lcp, 2500, 4000);
+  const tbtStatus = getMetricStatus(tbt, 200, 600);
+  const clsStatus = getMetricStatus(cls, 0.1, 0.25);
+
+  // Overall status: poor if any core metric is poor, good if all are good, else needs-improvement
+  const overallStatus = computeOverallStatus(lcpStatus, tbtStatus, clsStatus);
 
   // Optimization opportunities
-  const unusedJs = audits['unused-javascript']?.details?.overallSavingsBytes || 0;
-  const unusedCss = audits['unused-css-rules']?.details?.overallSavingsBytes || 0;
+  const unusedJavascriptBytes = audits['unused-javascript']?.details?.overallSavingsBytes || 0;
+  const unusedCssBytes = audits['unused-css-rules']?.details?.overallSavingsBytes || 0;
 
-  // Render blocking
-  const renderBlocking = audits['render-blocking-resources'] || null;
+  // Render blocking resources (handle both old and new style)
+  const renderBlockingAudit = audits['render-blocking-resources'] || audits['render-blocking-insight'];
+  const renderBlockingItems = renderBlockingAudit?.details?.items || [];
+  const renderBlockingResources = renderBlockingItems.map((item: any) => ({
+    url: item.url || '',
+    totalBytes: item.totalBytes || 0,
+    wastedMs: item.wastedMs || 0,
+  }));
+  const renderBlockingSavingsMs = renderBlockingAudit?.details?.overallSavingsMs || 0;
 
   // Long tasks
-  const longTasks = audits['long-tasks'] || null;
+  const longTasksAudit = audits['long-tasks'];
+  const longTaskItems = longTasksAudit?.details?.items || [];
+  const longTaskCount = longTaskItems.length;
+  const longestTaskMs = longTaskItems.length > 0
+    ? Math.max(...longTaskItems.map((item: any) => item.duration || 0))
+    : 0;
 
   // Main thread work
-  const mainThreadWork = audits['mainthread-work-breakdown']?.numericValue || 0;
+  const mainThreadWorkMs = audits['mainthread-work-breakdown']?.numericValue || 0;
 
   // LCP element (handle both old and new style)
-  const lcpElementAudit =
-    audits['largest-contentful-paint-element'] || audits['lcp-breakdown-insight'];
-  const lcpElement = lcpElementAudit?.details?.items?.[0]?.node?.snippet || 'Unknown';
+  const lcpElementAudit = audits['largest-contentful-paint-element'] || audits['lcp-breakdown-insight'];
+  const lcpElementItem = lcpElementAudit?.details?.items?.[0];
+  const lcpElement = lcpElementItem
+    ? {
+        selector: lcpElementItem.node?.selector || '',
+        snippet: lcpElementItem.node?.snippet || '',
+        nodeLabel: lcpElementItem.node?.nodeLabel || '',
+      }
+    : null;
+
+  // LCP Breakdown phases (handle both old and new style)
+  const lcpBreakdownAudit = audits['lcp-breakdown-insight'] || audits['largest-contentful-paint-element'];
+  const lcpBreakdownItems = lcpBreakdownAudit?.details?.items || [];
+  const lcpBreakdown = lcpBreakdownItems.length > 0
+    ? {
+        ttfb: lcpBreakdownItems[0].timeToFirstByte || 0,
+        resourceLoadDelay: lcpBreakdownItems[0].resourceLoadDelay || 0,
+        resourceLoadDuration: lcpBreakdownItems[0].resourceLoadDuration || 0,
+        elementRenderDelay: lcpBreakdownItems[0].elementRenderDelay || 0,
+      }
+    : null;
 
   // CLS culprits (handle both old and new style)
   const clsAudit = audits['layout-shift-elements'] || audits['cls-culprits-insight'];
-  const clsCulprits = clsAudit?.details?.items || [];
+  const clsItems = clsAudit?.details?.items || [];
+  const clsCulprits = clsItems.map((item: any) => ({
+    selector: item.node?.selector || '',
+    score: item.cumulativeLayoutShiftValue || 0,
+    cause: item.cause || '',
+  }));
 
-  // Font issues
-  const fontIssues = audits['font-display'] || audits['font-display-insight'] || null;
+  // Font issues (handle both old and new style)
+  const fontAudit = audits['font-display'] || audits['font-display-insight'];
+  const fontItems = fontAudit?.details?.items || [];
+  const fontIssues = fontItems.map((item: any) => ({
+    url: item.url || '',
+    wastedMs: item.wastedMs || 0,
+  }));
 
   // Network information
-  const networkRequests = resourceSummary.reduce(
+  const totalRequestCount = resourceSummary.reduce(
     (sum: number, item: ResourceItem) => sum + (item.requestCount || 0),
     0
   );
@@ -87,34 +131,131 @@ export function extractMetrics(psiResponse: any): ExtractedMetrics {
     0
   );
 
+  // Parse resources by type
+  const resources = parseResourceSummary(resourceSummary);
+
   // HTTP protocol detection
-  let httpProtocol = 'HTTP/1.1';
-  const performanceLog = lr.configSettings?.emulatedFormFactor || 'desktop';
-  // Note: PSI doesn't directly expose protocol, defaulting to HTTP/1.1
-  // This could be enhanced with additional data if available
+  const httpProtocol = 'HTTP/1.1'; // PSI doesn't directly expose protocol
+
+  // Collect raw Lighthouse categories and audit keys
+  const rawLighthouseCategories = lr.categories || {};
+  const rawLighthouseAuditKeys = Object.keys(audits);
 
   return {
-    performance: { score: performanceScore },
+    auditRunId,
+    runDate: admin.firestore.Timestamp.now(),
+    runMonth,
+    pageId,
+    pageUrl,
+    pageName,
+    strategy,
+    performanceScore,
     lcp,
     tbt,
     cls,
     fcp,
     si,
     tti,
+    lcpStatus,
+    tbtStatus,
+    clsStatus,
+    overallStatus,
     serverResponseTime,
-    resourceSummary,
-    unusedJs,
-    unusedCss,
-    renderBlocking,
-    longTasks,
-    mainThreadWork,
-    lcpElement,
-    clsCulprits,
-    fontIssues,
-    networkRequests,
+    totalRequestCount,
     totalByteWeight,
+    resources,
+    unusedJavascriptBytes,
+    unusedCssBytes,
+    renderBlockingSavingsMs,
+    longTaskCount,
+    longestTaskMs,
+    mainThreadWorkMs,
+    lcpElement,
+    lcpBreakdown,
+    clsCulprits,
+    renderBlockingResources,
+    fontIssues,
     httpProtocol,
-    pageWeight: totalByteWeight,
-    timestamp: new Date().toISOString(),
+    rawLighthouseCategories,
+    rawLighthouseAuditKeys,
   };
+}
+
+function getMetricStatus(
+  value: number,
+  goodThreshold: number,
+  poorThreshold: number
+): 'good' | 'needs-improvement' | 'poor' {
+  if (value <= goodThreshold) {
+    return 'good';
+  }
+  if (value >= poorThreshold) {
+    return 'poor';
+  }
+  return 'needs-improvement';
+}
+
+function computeOverallStatus(
+  lcpStatus: string,
+  tbtStatus: string,
+  clsStatus: string
+): 'good' | 'needs-improvement' | 'poor' {
+  if (lcpStatus === 'poor' || tbtStatus === 'poor' || clsStatus === 'poor') {
+    return 'poor';
+  }
+  if (lcpStatus === 'good' && tbtStatus === 'good' && clsStatus === 'good') {
+    return 'good';
+  }
+  return 'needs-improvement';
+}
+
+function parseResourceSummary(items: ResourceItem[]): {
+  scripts: { count: number; bytes: number };
+  images: { count: number; bytes: number };
+  fonts: { count: number; bytes: number };
+  stylesheets: { count: number; bytes: number };
+  documents: { count: number; bytes: number };
+  thirdParty: { count: number; bytes: number };
+  other: { count: number; bytes: number };
+} {
+  const resources = {
+    scripts: { count: 0, bytes: 0 },
+    images: { count: 0, bytes: 0 },
+    fonts: { count: 0, bytes: 0 },
+    stylesheets: { count: 0, bytes: 0 },
+    documents: { count: 0, bytes: 0 },
+    thirdParty: { count: 0, bytes: 0 },
+    other: { count: 0, bytes: 0 },
+  };
+
+  for (const item of items) {
+    const type = item.resourceType ? item.resourceType.toLowerCase() : 'other';
+    const count = item.requestCount || 0;
+    const bytes = item.transferSize || 0;
+
+    if (type.includes('script')) {
+      resources.scripts.count += count;
+      resources.scripts.bytes += bytes;
+    } else if (type.includes('image')) {
+      resources.images.count += count;
+      resources.images.bytes += bytes;
+    } else if (type.includes('font')) {
+      resources.fonts.count += count;
+      resources.fonts.bytes += bytes;
+    } else if (type.includes('stylesheet')) {
+      resources.stylesheets.count += count;
+      resources.stylesheets.bytes += bytes;
+    } else if (type.includes('document')) {
+      resources.documents.count += count;
+      resources.documents.bytes += bytes;
+    } else if (type.includes('third-party')) {
+      resources.thirdParty.count += count;
+      resources.thirdParty.bytes += bytes;
+    } else {
+      resources.other.count += count;
+      resources.other.bytes += bytes;
+    }
+  }
+
+  return resources;
 }

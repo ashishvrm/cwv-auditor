@@ -1,7 +1,8 @@
-import { initializeFirestore, FirestoreWriter } from './firestore-writer';
+import { initializeFirestore, FirestoreWriter, AuditResult } from './firestore-writer';
 import { MONITORED_PAGES, CWV_THRESHOLDS } from './config';
 import { runPSIAudit } from './psi-client';
-import { extractMetrics, ExtractedMetrics } from './metrics-extractor';
+import { extractMetrics } from './metrics-extractor';
+import admin from 'firebase-admin';
 
 interface AuditConfig {
   psiApiKey: string;
@@ -14,9 +15,14 @@ interface AuditRunResult {
   runId: string;
   status: 'completed' | 'failed';
   error?: string;
-  completedPages: number;
-  failedPages: number;
-  averagePerformance: number;
+  pagesAudited: number;
+  avgPerformanceScore: number;
+  avgLCP: number;
+  avgTBT: number;
+  avgCLS: number;
+  avgFCP: number;
+  avgTTI: number;
+  summary: { good: number; needsImprovement: number; poor: number };
 }
 
 async function runAudit(): Promise<AuditRunResult> {
@@ -42,7 +48,9 @@ async function runAudit(): Promise<AuditRunResult> {
   }
 
   let firestore: FirestoreWriter;
-  let runId: string;
+  let runId: string = '';
+  const now = new Date();
+  const runMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
   try {
     // Initialize Firestore
@@ -51,91 +59,129 @@ async function runAudit(): Promise<AuditRunResult> {
       config.firebaseProjectId
     );
 
+    // Get app config or use fallback
+    console.log('Fetching app config...');
+    const appConfig = await firestore.getAppConfig();
+    const monitoredPages = appConfig?.monitoredPages || MONITORED_PAGES;
+
     // Create audit run
     console.log('Creating audit run...');
     runId = await firestore.createAuditRun({
-      status: 'running',
+      runDate: admin.firestore.Timestamp.now(),
+      runMonth,
       strategy: config.strategy,
-      totalPages: MONITORED_PAGES.length,
-      completedPages: 0,
-      failedPages: 0,
+      triggeredBy: 'scheduled',
+      triggeredByUser: null,
+      status: 'running',
+      pagesAudited: 0,
+      avgPerformanceScore: 0,
+      avgLCP: 0,
+      avgTBT: 0,
+      avgCLS: 0,
+      avgFCP: 0,
+      avgTTI: 0,
+      summary: { good: 0, needsImprovement: 0, poor: 0 },
+      completedAt: null,
+      errorMessage: null,
     });
     console.log(`Audit run created: ${runId}`);
 
-    const results: ExtractedMetrics[] = [];
-    let completedPages = 0;
-    let failedPages = 0;
+    const results: Omit<AuditResult, 'id' | 'createdAt'>[] = [];
+    let successCount = 0;
+    let failCount = 0;
 
     // Audit each page
-    for (const page of MONITORED_PAGES) {
+    for (const page of monitoredPages) {
       try {
         console.log(`Auditing ${page.name}...`);
 
-        const psiResponse = await runPSIAudit(page.url, config.strategy, config.psiApiKey);
-        const metrics = extractMetrics(psiResponse);
+        const psiResponse = await runPSIAudit(
+          page.url,
+          config.strategy,
+          config.psiApiKey
+        );
 
-        // Create audit result
-        await firestore.createAuditResult(runId, {
-          pageId: page.id,
-          url: page.url,
-          strategy: config.strategy,
-          timestamp: new Date().toISOString(),
-          performance: metrics.performance,
-          lcp: metrics.lcp,
-          tbt: metrics.tbt,
-          cls: metrics.cls,
-          fcp: metrics.fcp,
-          si: metrics.si,
-          tti: metrics.tti,
-          serverResponseTime: metrics.serverResponseTime,
-          resourceSummary: metrics.resourceSummary,
-          unusedJs: metrics.unusedJs,
-          unusedCss: metrics.unusedCss,
-          renderBlocking: metrics.renderBlocking,
-          longTasks: metrics.longTasks,
-          mainThreadWork: metrics.mainThreadWork,
-          lcpElement: metrics.lcpElement,
-          clsCulprits: metrics.clsCulprits,
-          fontIssues: metrics.fontIssues,
-          networkRequests: metrics.networkRequests,
-          totalByteWeight: metrics.totalByteWeight,
-          httpProtocol: metrics.httpProtocol,
-          pageWeight: metrics.pageWeight,
-        });
+        const auditResult = extractMetrics(
+          psiResponse,
+          page.id,
+          page.url,
+          page.name,
+          runId,
+          config.strategy,
+          now
+        );
 
-        results.push(metrics);
-        completedPages++;
+        // Write audit result to top-level collection
+        await firestore.createAuditResult(auditResult);
+
+        results.push(auditResult);
+        successCount++;
         console.log(`✓ ${page.name} audited successfully`);
       } catch (error) {
-        failedPages++;
+        failCount++;
         console.error(
-          `✗ Failed to audit ${page.name}: ${error instanceof Error ? error.message : String(error)}`
+          `✗ Failed to audit ${page.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
         );
       }
     }
 
-    // Calculate average performance
-    const averagePerformance =
+    // Calculate averages and summary
+    const avgPerformanceScore =
       results.length > 0
-        ? results.reduce((sum, r) => sum + r.performance.score, 0) / results.length
+        ? results.reduce((sum, r) => sum + r.performanceScore, 0) / results.length
         : 0;
+
+    const avgLCP =
+      results.length > 0 ? results.reduce((sum, r) => sum + r.lcp, 0) / results.length : 0;
+
+    const avgTBT =
+      results.length > 0 ? results.reduce((sum, r) => sum + r.tbt, 0) / results.length : 0;
+
+    const avgCLS =
+      results.length > 0 ? results.reduce((sum, r) => sum + r.cls, 0) / results.length : 0;
+
+    const avgFCP =
+      results.length > 0 ? results.reduce((sum, r) => sum + r.fcp, 0) / results.length : 0;
+
+    const avgTTI =
+      results.length > 0 ? results.reduce((sum, r) => sum + r.tti, 0) / results.length : 0;
+
+    // Count statuses
+    const summary = {
+      good: results.filter((r) => r.overallStatus === 'good').length,
+      needsImprovement: results.filter((r) => r.overallStatus === 'needs-improvement').length,
+      poor: results.filter((r) => r.overallStatus === 'poor').length,
+    };
 
     // Update audit run with completion status
     console.log('Finalizing audit run...');
     await firestore.updateAuditRun(runId, {
       status: 'completed',
-      completedPages,
-      failedPages,
-      averagePerformance,
+      pagesAudited: successCount,
+      avgPerformanceScore: Math.round(avgPerformanceScore),
+      avgLCP: Math.round(avgLCP),
+      avgTBT: Math.round(avgTBT),
+      avgCLS: Math.round(avgCLS * 100) / 100,
+      avgFCP: Math.round(avgFCP),
+      avgTTI: Math.round(avgTTI),
+      summary,
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
     console.log(`Audit run ${runId} completed successfully`);
     return {
       runId,
       status: 'completed',
-      completedPages,
-      failedPages,
-      averagePerformance,
+      pagesAudited: successCount,
+      avgPerformanceScore: Math.round(avgPerformanceScore),
+      avgLCP: Math.round(avgLCP),
+      avgTBT: Math.round(avgTBT),
+      avgCLS: Math.round(avgCLS * 100) / 100,
+      avgFCP: Math.round(avgFCP),
+      avgTTI: Math.round(avgTTI),
+      summary,
     };
   } catch (error) {
     const errorMessage =
@@ -148,10 +194,13 @@ async function runAudit(): Promise<AuditRunResult> {
         await firestore.updateAuditRun(runId, {
           status: 'failed',
           errorMessage,
+          completedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } catch (updateError) {
         console.error(
-          `Failed to update audit run status: ${updateError instanceof Error ? updateError.message : String(updateError)}`
+          `Failed to update audit run status: ${
+            updateError instanceof Error ? updateError.message : String(updateError)
+          }`
         );
       }
     }
