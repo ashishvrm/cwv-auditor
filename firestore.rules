@@ -1,31 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAdmin() {
-      return request.auth.token.admin == true;
-    }
-
+    // Helper: check if user is authenticated
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    match /audit_runs/{runId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
-
-      match /audit_results/{resultId} {
-        allow read: if isAuthenticated();
-        allow write: if isAdmin();
-      }
+    // Helper: check if user has admin role in their user document
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
     }
 
-    match /app_config/{document=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
-    }
-
+    // Users can only read/write their own user document
     match /users/{userId} {
-      allow read, write: if request.auth.uid == userId;
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Audit runs: readable and writable by any authenticated user (for manual audits)
+    match /audit_runs/{runId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Audit results: readable and writable by any authenticated user (for manual audits)
+    match /audit_results/{resultId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // App config: readable and writable by authenticated users
+    match /app_config/{document=**} {
+      allow read, write: if isAuthenticated();
     }
   }
 }

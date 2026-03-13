@@ -9,7 +9,7 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "createdAt",
+          "fieldPath": "runDate",
           "order": "DESCENDING"
         }
       ]
@@ -23,7 +23,21 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "timestamp",
+          "fieldPath": "runDate",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "audit_results",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "auditRunId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "runDate",
           "order": "DESCENDING"
         }
       ]

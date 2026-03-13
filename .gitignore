@@ -11,3 +11,8 @@ dist/
 .idea/
 .vscode/
 *.iml
+.claude/
+
+# Secrets - never commit these
+scripts/service-account.json
+**/service-account*.json

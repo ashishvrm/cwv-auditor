@@ -4,7 +4,7 @@ import StatusBadge from './StatusBadge';
 interface AuditData {
   results: Array<{
     pageId: string;
-    performance: { score: number };
+    performanceScore: number;
     lcp: number;
     tbt: number;
     cls: number;
@@ -34,7 +34,7 @@ const MetricsCharts: React.FC<MetricsChartsProps> = ({ auditData }) => {
           <p className="mb-2 text-xs text-slate-400">Performance Score</p>
           <p className="mb-3 text-3xl font-bold text-white">
             {Math.round(
-              auditData.results.reduce((sum, r) => sum + r.performance.score, 0) /
+              auditData.results.reduce((sum, r) => sum + r.performanceScore, 0) /
                 auditData.results.length
             )}
           </p>
@@ -172,7 +172,7 @@ const MetricsCharts: React.FC<MetricsChartsProps> = ({ auditData }) => {
               {auditData.results.map((result) => (
                 <tr key={result.pageId} className="border-b border-slate-700 hover:bg-slate-800">
                   <td className="py-3 text-slate-300">{result.pageId}</td>
-                  <td className="py-3 text-slate-300">{Math.round(result.performance.score)}</td>
+                  <td className="py-3 text-slate-300">{Math.round(result.performanceScore)}</td>
                   <td className="py-3">
                     <StatusBadge
                       value={result.lcp}

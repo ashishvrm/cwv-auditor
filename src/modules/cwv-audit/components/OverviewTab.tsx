@@ -7,7 +7,7 @@ interface AuditData {
   timestamp: string;
   results: Array<{
     pageId: string;
-    performance: { score: number };
+    performanceScore: number;
     lcp: number;
     tbt: number;
     cls: number;
@@ -21,7 +21,7 @@ interface OverviewTabProps {
 const OverviewTab: React.FC<OverviewTabProps> = ({ auditData }) => {
   const avgPerformance =
     auditData.results.length > 0
-      ? auditData.results.reduce((sum, r) => sum + r.performance.score, 0) /
+      ? auditData.results.reduce((sum, r) => sum + (r.performanceScore ?? 0), 0) /
         auditData.results.length
       : 0;
 

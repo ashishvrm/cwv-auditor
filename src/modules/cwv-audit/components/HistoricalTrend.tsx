@@ -5,7 +5,7 @@ import { format, parseISO } from 'date-fns';
 interface AuditResult {
   pageId: string;
   timestamp: string;
-  performance: { score: number };
+  performanceScore: number;
   lcp: number;
   tbt: number;
   cls: number;
@@ -31,7 +31,7 @@ const HistoricalTrend: React.FC<HistoricalTrendProps> = ({ runs }) => {
     .map((run) => {
       const avgPerformance =
         run.results && run.results.length > 0
-          ? run.results.reduce((sum, r) => sum + r.performance.score, 0) / run.results.length
+          ? run.results.reduce((sum, r) => sum + r.performanceScore, 0) / run.results.length
           : 0;
 
       const avgLcp =

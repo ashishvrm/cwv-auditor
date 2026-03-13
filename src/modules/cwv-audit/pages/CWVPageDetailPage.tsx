@@ -62,7 +62,7 @@ const CWVPageDetailPage: React.FC = () => {
     pageId: currentMetrics.pageId,
     url: currentMetrics.pageUrl,
     timestamp: currentMetrics.runDate.toDate().toISOString(),
-    performance: { score: currentMetrics.performanceScore },
+    performanceScore: currentMetrics.performanceScore,
     lcp: currentMetrics.lcp,
     tbt: currentMetrics.tbt,
     cls: currentMetrics.cls,

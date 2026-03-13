@@ -3,6 +3,7 @@ import { useRunAudit } from '../hooks/useRunAudit';
 import { useCWVSettings } from '../hooks/useCWVSettings';
 import { MONITORED_PAGES as DEFAULT_PAGES, CWV_THRESHOLDS } from '../constants/pages';
 import RunAuditButton from '../components/RunAuditButton';
+import AuditProgressPanel from '../components/AuditProgressPanel';
 import { Trash2, Plus, Download } from 'lucide-react';
 
 interface MonitoredPage {
@@ -14,7 +15,7 @@ interface MonitoredPage {
 }
 
 const CWVSettingsPage: React.FC = () => {
-  const { runAudit, isRunning: isAuditRunning } = useRunAudit();
+  const { runAudit, progress, isRunning: isAuditRunning, dismissProgress } = useRunAudit();
   const { settings, saveSettings } = useCWVSettings();
   const [pages, setPages] = useState<MonitoredPage[]>(DEFAULT_PAGES);
   const [strategy, setStrategy] = useState<'Desktop' | 'Mobile' | 'Both'>('Desktop');
@@ -228,6 +229,11 @@ const CWVSettingsPage: React.FC = () => {
             <h2 className="mb-4 text-2xl font-bold text-white">Manual Audit</h2>
             <p className="mb-6 text-slate-400">Run an audit immediately instead of waiting for the scheduled monthly audit.</p>
             <RunAuditButton onClick={runAudit} isLoading={isAuditRunning} />
+            {progress.step !== 'idle' && (
+              <div className="mt-6">
+                <AuditProgressPanel progress={progress} onDismiss={dismissProgress} />
+              </div>
+            )}
           </div>
 
           {/* Data Management Section */}

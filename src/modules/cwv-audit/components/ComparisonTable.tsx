@@ -3,7 +3,7 @@ import { TrendingUp, TrendingDown } from 'lucide-react';
 
 interface AuditResult {
   pageId: string;
-  performance: { score: number };
+  performanceScore: number;
   lcp: number;
   tbt: number;
   cls: number;
@@ -44,7 +44,7 @@ const ComparisonTable: React.FC<ComparisonTableProps> = ({ runs }) => {
         const result = run.results?.find((r) => r.pageId === pageId);
         if (result) {
           const suffix = `_run${idx + 1}`;
-          row[`performance${suffix}`] = Math.round(result.performance.score);
+          row[`performance${suffix}`] = Math.round(result.performanceScore);
           row[`lcp${suffix}`] = Math.round(result.lcp);
           row[`tbt${suffix}`] = Math.round(result.tbt);
           row[`cls${suffix}`] = result.cls.toFixed(2);

@@ -7,7 +7,7 @@ interface Metrics {
   pageId: string;
   url: string;
   timestamp: string;
-  performance: { score: number };
+  performanceScore: number;
   lcp: number;
   tbt: number;
   cls: number;
@@ -49,7 +49,7 @@ const PageDetailCard: React.FC<PageDetailCardProps> = ({ metrics }) => {
             <h2 className="text-2xl font-bold text-white">{metrics.pageId}</h2>
             <p className="mt-1 text-sm text-slate-400">{metrics.url}</p>
           </div>
-          <ScoreGauge score={metrics.performance.score} />
+          <ScoreGauge score={metrics.performanceScore} />
         </div>
         <p className="text-xs text-slate-400">
           Last audited: {format(new Date(metrics.timestamp), 'MMM d, yyyy h:mm a')}

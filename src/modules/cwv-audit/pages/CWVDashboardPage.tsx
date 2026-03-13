@@ -7,13 +7,14 @@ import MetricsCharts from '../components/MetricsCharts';
 import PageWeightCharts from '../components/PageWeightCharts';
 import PrioritiesTable from '../components/PrioritiesTable';
 import RunAuditButton from '../components/RunAuditButton';
+import AuditProgressPanel from '../components/AuditProgressPanel';
 
 type TabType = 'overview' | 'metrics' | 'weight' | 'priorities';
 
 const CWVDashboardPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
-  const { run, results, loading, error } = useLatestAudit();
-  const { runAudit, isRunning: isAuditRunning } = useRunAudit();
+  const { run, results, loading, error, refetch } = useLatestAudit();
+  const { runAudit, progress, isRunning: isAuditRunning, dismissProgress } = useRunAudit(refetch);
 
   const handleRunAudit = async () => {
     await runAudit();
@@ -47,8 +48,13 @@ const CWVDashboardPage: React.FC = () => {
           </div>
         </div>
 
+        {/* Audit Progress Panel */}
+        {progress.step !== 'idle' && (
+          <AuditProgressPanel progress={progress} onDismiss={dismissProgress} />
+        )}
+
         {/* Error State */}
-        {error && (
+        {error && progress.step === 'idle' && (
           <div className="mb-6 rounded-lg border border-red-800 bg-red-950 p-4 text-red-200">
             <p className="font-semibold">Error loading audit data</p>
             <p className="text-sm">{error}</p>
@@ -120,7 +126,7 @@ const CWVDashboardPage: React.FC = () => {
         )}
 
         {/* Empty State */}
-        {!loading && !auditData && !error && (
+        {!loading && !auditData && !error && !isAuditRunning && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <p className="text-slate-400">No audit data available</p>
             <button
